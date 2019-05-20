@@ -1,8 +1,8 @@
 const cron = require('node-cron');
 
 const mongoose = require('mongoose');
-const upsertMany = require('@meanie/mongoose-upsert-many');
-mongoose.plugin(upsertMany);
+const bulkOp = require('mongoose-bulkop');
+mongoose.plugin(bulkOp);
 
 const uwopendataTasks = require('require.all')('./uwopendata/tasks');
 const logger = require('./config/winston')();
@@ -17,8 +17,8 @@ mongoose.connection.on('error', () => {
 mongoose.connection.once('open', async () => {
     logger.info('Successfully connected to database uwcourseapi');
 
-    await uwopendataTasks.scrape_courses({first_run: true});
-    await uwopendataTasks.scrape_courses_schedule({first_run: true});
+    await uwopendataTasks.scrape_courses({firstRun: true});
+    //await uwopendataTasks.scrape_courses_schedule({firstRun: true});
     //cron.schedule('*/5 * * * *', async () => {
     //    await uwopendataTasks.scrape_courses();
     //    logger.info('Task `scrape_courses` completed');

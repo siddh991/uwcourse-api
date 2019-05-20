@@ -32,85 +32,92 @@ module.exports = async (options) => {
 
     options = Object.assign({
         // a dictionary of courses by course_id
-        doc_path: `${approot}/uwopendata/data/courses.json`,
+        dictCoursesArchivePath: `${approot}/uwopendata/data/courses.json`,
         // an array of all courses
-        doc_path_array: `${approot}/uwopendata/data/courses_array.json`,
-        doc_encoding: 'utf8',
-        batch_size: 300,
-        batch_delay: 500,
-        first_run: false
+        listCoursesArchivePath: `${approot}/uwopendata/data/courses_array.json`,
+        archiveEncoding: 'utf8',
+        batchSize: 300,
+        batchDelay: 500,
+        firstRun: false
     }, options);
 
-    let courses_dict = {}; // dictionary of courses by course_id
-    let doc_path_exist = true; // check if the doc_path file exists
+    let listCourses; // an array of all courses in the format given by /courses
+    let dictCourses = {}; // dictionary of courses by course_id
+    let dictCoursesArchiveExists = true; // check if the dictCoursesArchivePath file exist
 
     {
         // request for a list of all courses
         // remove the message field of the response
         logger.verbose(`Requesting a list of all courses`);
-        var course_list = (await uwapi.get('/courses', {})).data;
+        listCourses = (await uwapi.get('/courses', {})).data;
 
-        // create a dict of courses from course_list
-        for (let item of course_list) {
-            if (courses_dict.hasOwnProperty(item.course_id))
-                courses_dict[item.course_id].push(item);
+        // Take only 50 for testing
+        listCourses = listCourses.slice(0, 50);
+
+        // create a dict of courses from listCourses
+        for (let item of listCourses) {
+            // Some courses a crosslisted and thus have the same course_id
+            // Each item of dictCourses is thus a list to store multiple items
+            if (dictCourses.hasOwnProperty(item.course_id))
+                dictCourses[item.course_id].push(item);
             else
-                courses_dict[item.course_id] = [item];
+                dictCourses[item.course_id] = [item];
         }
 
         {
-            logger.verbose(`Requesting details of ${course_list.length} courses, one by one`);
+            logger.verbose(`Requesting details of ${listCourses.length} courses, one by one`);
 
             // Create a queue of parameters for GET requests
-            let queue = [];
-            for (const item of course_list) {
-                queue.push({endpoint: `/courses/${item.subject}/${item.catalog_number}`, qs: {}});
+            let queueParameters = [];
+            for (const item of listCourses) {
+                queueParameters.push({endpoint: `/courses/${item.subject}/${item.catalog_number}`, qs: {}});
             }
 
-            // details_data contain an array of all responses, each corresponds to a course, from the UW API
-            let details_data = [];
+            // listDetailedCourses contain an array of all responses, each corresponds to a course, from the UW API
+            let listDetailedCourses = [];
 
             // Since there might be too many courses, we need to put a delay between our requests
+            // TODO: Refactor this for reuse in other modules
             const requestInBatch = async () => {
-                while (queue.length > 0) {
-                    let batch_result = await Promise.all(queue.slice(0, options.batch_size)
+                while (queueParameters.length > 0) {
+                    let batchResult = await Promise.all(queueParameters.slice(0, options.batchSize)
                         .map(e => uwapi.get(e.endpoint, e.qs)));
-                    queue = queue.slice(options.batch_size);
-                    await timeOut(options.batch_delay);
-                    for (let e of batch_result)
-                        details_data.push(e.data);
+                    queueParameters = queueParameters.slice(options.batchSize);
+                    await timeOut(options.batchDelay);
+                    for (let e of batchResult)
+                        listDetailedCourses.push(e.data);
                 }
             };
             try {
                 await requestInBatch();
-                logger.verbose(`Fetched details of ${details_data.length}/${course_list.length} courses`);
+                logger.verbose(`Fetched details of ${listDetailedCourses.length}/${listCourses.length} courses`);
             } catch (error) {
-                logger.error(`Failed to fetch details of ${course_list.length} courses`);
+                logger.error(`Failed to fetch details of ${listCourses.length} courses`);
                 return;
             }
 
             // merge the `/courses` response with the `/courses/course_id` responses
             // since the response from `/courses` contain a subset of the fields we need, we will reuse it
-            details_data.forEach((detailed_course) => {
-                let courses_by_id = courses_dict[detailed_course.course_id];
-                courses_by_id.forEach((res_course, index) => {
-                    if (res_course.subject === detailed_course.subject &&
-                        res_course.catalog_number === detailed_course.catalog_number) {
-                        courses_by_id[index] = Object.assign({
-                            units: detailed_course.units,
-                            description: detailed_course.description,
-                            instructions: detailed_course.instructions,
-                            prerequisites: detailed_course.prerequisites,
-                            corequisites: detailed_course.corequisites,
-                            antirequisites: detailed_course.antirequisites,
-                            crosslistings: detailed_course.crosslistings,
-                            notes: detailed_course.notes,
-                            offerings: detailed_course.offerings,
-                            needs_department_consent: detailed_course.needs_department_consent,
-                            needs_instructor_consent: detailed_course.needs_instructor_consent,
-                            extra: detailed_course.extra,
-                            url: detailed_course.url,
-                            academic_level: detailed_course.academic_level,
+            listDetailedCourses.forEach((detailedCourse) => {
+                let listCoursesByID = dictCourses[detailedCourse.course_id];
+                listCoursesByID.forEach((res_course, index) => {
+                    if (res_course.subject === detailedCourse.subject &&
+                        res_course.catalog_number === detailedCourse.catalog_number) {
+                        listCoursesByID[index] = Object.assign({
+                            units: detailedCourse.units,
+                            description: detailedCourse.description,
+                            instructions: detailedCourse.instructions,
+                            prerequisites: detailedCourse.prerequisites,
+                            corequisites: detailedCourse.corequisites,
+                            antirequisites: detailedCourse.antirequisites,
+                            crosslistings: detailedCourse.crosslistings,
+                            notes: detailedCourse.notes,
+                            offerings: detailedCourse.offerings,
+                            needs_department_consent: detailedCourse.needs_department_consent,
+                            needs_instructor_consent: detailedCourse.needs_instructor_consent,
+                            extra: detailedCourse.extra,
+                            url: detailedCourse.url,
+                            academic_level: detailedCourse.academic_level,
                         }, res_course);
                     }
                 });
@@ -118,32 +125,32 @@ module.exports = async (options) => {
         }
     }
 
-    if (!options.first_run) {
+    if (!options.firstRun) {
         // Check if DOC_PATH exists
         try {
-            await fs.promises.access(options.doc_path, fs.constants.F_OK);
+            await fs.promises.access(options.dictCoursesArchivePath, fs.constants.F_OK);
         } catch (err) {
             if (err.code === 'ENOENT')
-                doc_path_exist = false;
+                dictCoursesArchiveExists = false;
             else throw Error(err);
         }
-        logger.verbose(`${options.doc_path} ${doc_path_exist ? 'exist' : 'does not exist'}`);
+        logger.verbose(`${options.dictCoursesArchivePath} ${dictCoursesArchiveExists ? 'exist' : 'does not exist'}`);
     }
 
-    var items = [];
-    if (!doc_path_exist || options.first_run) {
+    let items;
+    if (!dictCoursesArchiveExists || options.firstRun) {
         logger.verbose('Updating the whole database');
-        items = coursediff.newCourses([], courses_dict);
+        items = coursediff.newCourses([], dictCourses);
     } else {
         logger.verbose('Loading previous state documents and compare');
-        let previous_state = JSON.parse(await fs.promises.readFile(options.doc_path, options.doc_encoding));
-        items = coursediff.newCourses(previous_state, courses_dict);
-        items = items + coursediff.generateModifications(previous_state, courses_dict);
+        let archivedState = JSON.parse(await fs.promises.readFile(options.dictCoursesArchivePath, options.archiveEncoding));
+        items = coursediff.newCourses(archivedState, dictCourses);
+        items = items + coursediff.generateModifications(archivedState, dictCourses);
     }
 
     try {
-        const upsert_result = await Course.upsertMany(items);
-        logger.verbose(`Successfully updated ${upsert_result.nUpserted} and created ${upsert_result.nModified} ` +
+        const upsertResult = await Course.bulkUpsertUpdateOne(items);
+        logger.verbose(`Successfully updated ${upsertResult.nUpserted} and created ${upsertResult.nModified} ` +
             `courses on database`);
     } catch (err) {
         logger.error(`Failed to update Course model`);
@@ -152,24 +159,24 @@ module.exports = async (options) => {
     }
 
     try {
-        logger.verbose(`Saving course details as dictionary to ${options.doc_path}`);
-        await fs.promises.writeFile(options.doc_path, JSON.stringify(courses_dict), options.doc_encoding);
-        logger.verbose(`Updated ${options.doc_path}`);
+        logger.verbose(`Saving course details as dictionary to ${options.dictCoursesArchivePath}`);
+        await fs.promises.writeFile(options.dictCoursesArchivePath, JSON.stringify(dictCourses), options.archiveEncoding);
+        logger.verbose(`Updated ${options.dictCoursesArchivePath}`);
     } catch (err) {
         logger.error(err);
         throw Error(err);
     }
 
     try {
-        logger.verbose(`Saving course array to ${options.doc_path_array}`);
+        logger.verbose(`Saving course array to ${options.listCoursesArchivePath}`);
 
         // Drop the course title since we are not using it
-        for (let item in course_list) {
+        for (let item in listCourses) {
             delete item.title;
         }
 
-        await fs.promises.writeFile(options.doc_path_array, JSON.stringify(course_list), options.doc_encoding);
-        logger.verbose(`Updated ${options.doc_path_array}`);
+        await fs.promises.writeFile(options.listCoursesArchivePath, JSON.stringify(listCourses), options.archiveEncoding);
+        logger.verbose(`Updated ${options.listCoursesArchivePath}`);
     }
     catch (err) {
         logger.error(err);
